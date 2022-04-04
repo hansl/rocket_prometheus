@@ -110,6 +110,7 @@ use prometheus::{opts, Encoder, HistogramVec, IntCounterVec, Registry, TextEncod
 use rocket::{
     fairing::{Fairing, Info, Kind},
     http::{ContentType, Method},
+    Responder,
     route::{Handler, Outcome},
     Data, Request, Response, Route,
 };
@@ -429,20 +430,31 @@ impl Fairing for PrometheusMetrics {
             return;
         }
 
-        let endpoint = req.route().unwrap().uri.as_str();
+        let endpoint = req.route().unwrap().uri.to_string();
         let method = req.method().as_str();
         let status = StatusCode::from(response.status().code);
         self.http_requests_total
-            .with_label_values(&[endpoint, method, status.as_str()])
+            .with_label_values(&[endpoint.as_str(), method, status.as_str()])
             .inc();
 
         let start_time = req.local_cache(|| TimerStart(None));
         if let Some(duration) = start_time.0.map(|st| st.elapsed()) {
             let duration_secs = duration.as_secs_f64();
             self.http_requests_duration_seconds
-                .with_label_values(&[endpoint, method, status.as_str()])
+                .with_label_values(&[endpoint.as_str(), method, status.as_str()])
                 .observe(duration_secs);
         }
+    }
+}
+
+#[derive(Responder)]
+struct Custom {
+    inner: String,
+    header: ContentType,
+}
+impl Custom {
+    fn new(header: ContentType, inner: String) -> Self {
+        Self { header, inner }
     }
 }
 
@@ -461,11 +473,7 @@ impl Handler for PrometheusMetrics {
         let body = String::from_utf8(buffer).unwrap();
         Outcome::from(
             req,
-            (
-                ContentType::new("text", "plain")
-                    .with_params([("version", "0.0.4"), ("charset", "utf-8")]),
-                body,
-            ),
+            Custom::new(ContentType::new("text", "plain").with_params([("version", "0.0.4"), ("charset", "utf-8")]), body)
         )
     }
 }
